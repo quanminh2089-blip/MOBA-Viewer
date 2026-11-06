@@ -158,6 +158,69 @@ jobs:
             exit "$STATUS"
           fi
 
+      - name: Test clean Godot Android APK
+        shell: bash
+        run: |
+          set -e
+          echo "=== CREATE CLEAN GODOT PROJECT ==="
+
+          mkdir -p /tmp/godot-clean
+          mkdir -p build
+
+          cat > /tmp/godot-clean/project.godot <<'EOF'
+          config_version=5
+
+          [application]
+          config/name="Godot Android Test"
+          run/main_scene="res://main.tscn"
+
+          [rendering]
+          renderer/rendering_method="gl_compatibility"
+          renderer/rendering_method.mobile="gl_compatibility"
+          EOF
+
+          cat > /tmp/godot-clean/main.tscn <<'EOF'
+          [gd_scene format=3]
+
+          [node name="Main" type="Node2D"]
+          EOF
+
+          cp godot/export_presets.cfg /tmp/godot-clean/export_presets.cfg
+
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/debug.keystore"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
+
+          echo "=== IMPORT CLEAN PROJECT ==="
+          godot --headless --path /tmp/godot-clean --import
+
+          echo "=== EXPORT CLEAN APK ==="
+          set +e
+          godot --headless --verbose \
+            --path /tmp/godot-clean \
+            --export-debug Android \
+            "$GITHUB_WORKSPACE/build/Godot-Test.apk" \
+            > "$GITHUB_WORKSPACE/build/clean-export.log" 2>&1
+          RESULT=$?
+          set -e
+
+          cat "$GITHUB_WORKSPACE/build/clean-export.log"
+
+          if [ "$RESULT" -ne 0 ] || [ ! -s build/Godot-Test.apk ]; then
+            echo "::error::CLEAN PROJECT EXPORT FAILED"
+            exit 1
+          fi
+
+          echo "CLEAN PROJECT EXPORT SUCCESS"
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Godot-Diagnostic
+          path: build/clean-export.log
+          if-no-files-found: ignore
+
       - name: Export Android APK
         run: |
           mkdir -p build
