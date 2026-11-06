@@ -95,6 +95,34 @@ jobs:
           cd godot
           godot --headless --path . --import
 
+      - name: Diagnose Godot Android export
+        run: |
+          echo "=== GODOT VERSION ==="
+          godot --version
+
+          echo "=== EXPORT TEMPLATES ==="
+          find "$HOME/.local/share/godot/export_templates" -maxdepth 3 -type f | head -40
+
+          echo "=== ANDROID SDK ==="
+          ls -la "$ANDROID_HOME"
+          ls -la "$ANDROID_HOME/platforms"
+          ls -la "$ANDROID_HOME/build-tools"
+
+          echo "=== JAVA ==="
+          java -version
+
+          echo "=== KEYSTORE ==="
+          test -s "$HOME/debug.keystore"
+
+          echo "=== GODOT EDITOR SETTINGS ==="
+          cat "$HOME/.config/godot/editor_settings-4.4.tres"
+
+          echo "=== EXPORT PRESET ==="
+          cat godot/export_presets.cfg
+
+          echo "=== PROJECT VALIDATION ==="
+          godot --headless --editor --path godot --quit
+
       - name: Export Android APK
         run: |
           mkdir -p build
