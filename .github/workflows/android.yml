@@ -1,5 +1,7 @@
 name: Build MOBA Map Viewer APK
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 jobs:
   build:
