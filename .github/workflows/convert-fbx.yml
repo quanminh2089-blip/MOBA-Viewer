@@ -14,11 +14,12 @@ jobs:
       - name: Install Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y blender
+          sudo apt-get install -y blender python3-numpy
 
       - name: Convert FBX to GLB
         run: |
           blender -b --python tools/convert_fbx.py
+          test -s output/1V1.glb
 
       - name: Upload converted model
         uses: actions/upload-artifact@v4
