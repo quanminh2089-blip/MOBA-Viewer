@@ -90,6 +90,24 @@ jobs:
           export/android/debug_keystore_pass = "android"
           SETTINGS
 
+      - name: Configure Android export signing
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path("godot/export_presets.cfg")
+          s = p.read_text()
+          s = s.replace(
+              'keystore/debug=""',
+              'keystore/debug="/home/runner/debug.keystore"'
+          )
+          s = s.replace(
+              'keystore/debug_password=""',
+              'keystore/debug_password="android"'
+          )
+          p.write_text(s)
+          print("Android debug signing configured")
+          PYCODE
+
       - name: Import Godot project
         run: |
           cd godot
@@ -122,6 +140,23 @@ jobs:
 
           echo "=== PROJECT VALIDATION ==="
           godot --headless --editor --path godot --quit
+
+      - name: Validate game startup
+        run: |
+          cd godot
+          set +e
+          timeout 90s godot --headless --path . --quit-after 2 > ../godot-validation.log 2>&1
+          STATUS=$?
+          set -e
+          cat ../godot-validation.log
+          if grep -E "SCRIPT ERROR|Parse Error" ../godot-validation.log; then
+            echo "GDScript validation failed"
+            exit 1
+          fi
+          if [ "$STATUS" -ne 0 ]; then
+            echo "Godot startup failed: $STATUS"
+            exit "$STATUS"
+          fi
 
       - name: Export Android APK
         run: |
