@@ -1,0 +1,28 @@
+name: Convert Unity FBX to GLB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Blender
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender
+
+      - name: Convert FBX to GLB
+        run: |
+          blender -b --python tools/convert_fbx.py
+
+      - name: Upload converted model
+        uses: actions/upload-artifact@v4
+        with:
+          name: MOBA-1V1-GLB
+          path: output/1V1.glb
+          if-no-files-found: error
