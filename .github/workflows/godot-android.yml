@@ -1,0 +1,83 @@
+name: Build Godot MOBA 1V1 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'godot/**'
+      - 'tools/convert_fbx.py'
+      - 'Assets/Art/SceneModel/**'
+      - '.github/workflows/godot-android.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Blender
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender python3-numpy
+
+      - name: Convert Unity map
+        run: |
+          blender -b --python-exit-code 1 --python tools/convert_fbx.py
+          test -s output/1V1.glb
+          mkdir -p godot/map
+          cp output/1V1.glb godot/map/1V1.glb
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.4.1
+          use-dotnet: false
+          include-templates: true
+
+      - name: Configure Godot Android paths
+        run: |
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.4.tres <<SETTINGS
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          SETTINGS
+
+      - name: Import Godot project
+        run: |
+          cd godot
+          godot --headless --path . --import
+
+      - name: Export Android APK
+        run: |
+          mkdir -p build
+          cd godot
+          godot --headless --path . --export-debug Android ../build/MOBA-1V1.apk
+          test -s ../build/MOBA-1V1.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MOBA-1V1-Godot-APK
+          path: build/MOBA-1V1.apk
+          if-no-files-found: error
