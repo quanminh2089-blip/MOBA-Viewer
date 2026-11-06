@@ -24,37 +24,35 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y blender python3-numpy
 
-      - name: Convert Unity map
+      - name: Convert FBX map to GLB
         run: |
           blender -b --python-exit-code 1 --python tools/convert_fbx.py
           test -s output/1V1.glb
           mkdir -p godot/map
           cp output/1V1.glb godot/map/1V1.glb
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android packages
+      - name: Setup Android SDK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
 
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1)
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
 
-          if [ -z "$SDKMANAGER" ]; then
-            echo "ERROR: Android sdkmanager not found"
-            find "$ANDROID_HOME" -maxdepth 3 -type d
-            exit 1
-          fi
-
-          echo "Using SDK manager: $SDKMANAGER"
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
@@ -66,20 +64,24 @@ jobs:
           use-dotnet: false
           include-templates: true
 
-      - name: Configure Godot Android paths
+      - name: Configure Android export
+        shell: bash
         run: |
-          mkdir -p ~/.config/godot
+          set -euo pipefail
 
-          keytool -genkeypair -v \
+          mkdir -p "$HOME/.config/godot"
+
+          keytool -genkeypair \
             -keystore "$HOME/debug.keystore" \
             -alias androiddebugkey \
-            -keyalg RSA -keysize 2048 \
+            -keyalg RSA \
+            -keysize 2048 \
             -validity 10000 \
             -storepass android \
             -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-          cat > ~/.config/godot/editor_settings-4.4.tres <<SETTINGS
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
 
           [resource]
@@ -88,90 +90,76 @@ jobs:
           export/android/debug_keystore = "$HOME/debug.keystore"
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
-          SETTINGS
+          EOF
 
-      - name: Configure Android export signing
-        run: |
-          python3 - <<'PYCODE'
-          from pathlib import Path
-          p = Path("godot/export_presets.cfg")
-          s = p.read_text()
-          s = s.replace(
-              'keystore/debug=""',
-              'keystore/debug="/home/runner/debug.keystore"'
-          )
-          s = s.replace(
-              'keystore/debug_password=""',
-              'keystore/debug_password="android"'
-          )
-          p.write_text(s)
-          print("Android debug signing configured")
-          PYCODE
+          cat > godot/export_presets.cfg <<'EOF'
+          [preset.0]
 
-      - name: Import Godot project
-        run: |
-          cd godot
-          godot --headless --path . --import
+          name="Android"
+          platform="Android"
+          runnable=true
+          advanced_options=false
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="../build/MOBA-1V1.apk"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
 
-      - name: Diagnose Godot Android export
-        run: |
-          echo "=== GODOT VERSION ==="
-          godot --version
+          [preset.0.options]
 
-          echo "=== EXPORT TEMPLATES ==="
-          find "$HOME/.local/share/godot/export_templates" -maxdepth 3 -type f | head -40
+          gradle_build/use_gradle_build=false
+          package/unique_name="com.minhquan.moba1v1viewer"
+          package/name="MOBA 1V1 Viewer"
+          package/min_sdk=23
+          package/target_sdk=35
+          architectures/armeabi-v7a=false
+          architectures/arm64-v8a=true
+          architectures/x86=false
+          architectures/x86_64=false
+          keystore/debug=""
+          keystore/debug_user=""
+          keystore/debug_password=""
+          permissions/internet=false
+          EOF
 
-          echo "=== ANDROID SDK ==="
-          ls -la "$ANDROID_HOME"
-          ls -la "$ANDROID_HOME/platforms"
-          ls -la "$ANDROID_HOME/build-tools"
-
-          echo "=== JAVA ==="
-          java -version
-
-          echo "=== KEYSTORE ==="
-          test -s "$HOME/debug.keystore"
-
-          echo "=== GODOT EDITOR SETTINGS ==="
-          cat "$HOME/.config/godot/editor_settings-4.4.tres"
-
-          echo "=== EXPORT PRESET ==="
+          echo "=== ANDROID CONFIG ==="
           cat godot/export_presets.cfg
 
-          echo "=== PROJECT VALIDATION ==="
-          godot --headless --editor --path godot --quit
-
-      - name: Validate game startup
+      - name: Import game
         run: |
-          cd godot
-          set +e
-          timeout 90s godot --headless --path . --quit-after 2 > ../godot-validation.log 2>&1
-          STATUS=$?
-          set -e
-          cat ../godot-validation.log
-          if grep -E "SCRIPT ERROR|Parse Error" ../godot-validation.log; then
-            echo "GDScript validation failed"
-            exit 1
-          fi
-          if [ "$STATUS" -ne 0 ]; then
-            echo "Godot startup failed: $STATUS"
-            exit "$STATUS"
-          fi
+          godot --headless --path godot --import
 
-      - name: Test clean Godot Android APK
+      - name: Validate game
         shell: bash
         run: |
           set -e
-          echo "=== CREATE CLEAN GODOT PROJECT ==="
+          godot --headless --path godot --quit-after 2 \
+            > game-validation.log 2>&1 || {
+              cat game-validation.log
+              exit 1
+            }
+          cat game-validation.log
 
-          mkdir -p /tmp/godot-clean
-          mkdir -p build
+          if grep -E "SCRIPT ERROR|Parse Error" game-validation.log; then
+            exit 1
+          fi
 
-          cat > /tmp/godot-clean/project.godot <<'EOF'
+      - name: Test clean Android export
+        shell: bash
+        run: |
+          set -e
+          mkdir -p /tmp/clean-godot build
+
+          cat > /tmp/clean-godot/project.godot <<'EOF'
           config_version=5
 
           [application]
-          config/name="Godot Android Test"
+          config/name="Android Export Test"
           run/main_scene="res://main.tscn"
 
           [rendering]
@@ -179,61 +167,58 @@ jobs:
           renderer/rendering_method.mobile="gl_compatibility"
           EOF
 
-          cat > /tmp/godot-clean/main.tscn <<'EOF'
+          cat > /tmp/clean-godot/main.tscn <<'EOF'
           [gd_scene format=3]
 
           [node name="Main" type="Node2D"]
           EOF
 
-          cp godot/export_presets.cfg /tmp/godot-clean/export_presets.cfg
+          cp godot/export_presets.cfg /tmp/clean-godot/export_presets.cfg
 
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/debug.keystore"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
+          godot --headless --path /tmp/clean-godot --import
 
-          echo "=== IMPORT CLEAN PROJECT ==="
-          godot --headless --path /tmp/godot-clean --import
-
-          echo "=== EXPORT CLEAN APK ==="
-          set +e
           godot --headless --verbose \
-            --path /tmp/godot-clean \
+            --path /tmp/clean-godot \
             --export-debug Android \
-            "$GITHUB_WORKSPACE/build/Godot-Test.apk" \
-            > "$GITHUB_WORKSPACE/build/clean-export.log" 2>&1
-          RESULT=$?
+            "$GITHUB_WORKSPACE/build/Android-Test.apk" \
+            > build/clean-export.log 2>&1 || {
+              cat build/clean-export.log
+              exit 1
+            }
+
+          test -s build/Android-Test.apk
+          echo "CLEAN APK SUCCESS"
+
+      - name: Export MOBA Android APK
+        shell: bash
+        run: |
           set -e
+          godot --headless --verbose \
+            --path godot \
+            --export-debug Android \
+            "$GITHUB_WORKSPACE/build/MOBA-1V1.apk" \
+            > build/game-export.log 2>&1 || {
+              cat build/game-export.log
+              exit 1
+            }
 
-          cat "$GITHUB_WORKSPACE/build/clean-export.log"
+          test -s build/MOBA-1V1.apk
+          echo "MOBA APK SUCCESS"
 
-          if [ "$RESULT" -ne 0 ] || [ ! -s build/Godot-Test.apk ]; then
-            echo "::error::CLEAN PROJECT EXPORT FAILED"
-            exit 1
-          fi
-
-          echo "CLEAN PROJECT EXPORT SUCCESS"
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MOBA-1V1-Android-APK
+          path: build/MOBA-1V1.apk
+          if-no-files-found: error
 
       - name: Upload diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Godot-Diagnostic
-          path: build/clean-export.log
+          name: Godot-Build-Logs
+          path: |
+            build/*.log
+            game-validation.log
           if-no-files-found: ignore
-
-      - name: Export Android APK
-        run: |
-          mkdir -p build
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/debug.keystore"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_USER="androiddebugkey"
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="android"
-          cd godot
-          godot --headless --verbose --path . --export-debug Android ../build/MOBA-1V1.apk
-          test -s ../build/MOBA-1V1.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: MOBA-1V1-Godot-APK
-          path: build/MOBA-1V1.apk
-          if-no-files-found: error
